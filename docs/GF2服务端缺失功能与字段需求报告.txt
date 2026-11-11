@@ -1,0 +1,1607 @@
+====================================================================================================
+  GF2（少女前线2：追放）单机服务端 · 缺失功能与字段需求报告
+  数据来源：解密后的 il2cpp 元数据 → Il2CppDumper dump.cs + GF2_deobfuscated.proto（明文）
+  客户端：4.0.5136（PC） · 服务端：NTRSimulator 改造版 · 生成日期：2026-11-11
+====================================================================================================
+
+【零】怎么读这份报告
+  本报告不是"缺了哪些功能"的清单，而是**每个缺失功能要什么字段**的实现规格：
+    · 每条缺失消息 = 请求字段清单 + 响应字段清单（都从 proto 明文抄出）
+    · 战斗链路单独成章，逐字段标注"客户端要 / 我们填了 / 不填的后果"
+    · 已实现但字段空洞的消息，列出缺哪几个字段、缺了会怎样
+  实现某条功能时：照抄该条的 CS/SC 字段 → 写 handler → 填响应 → 客户端才会认。
+
+【一】总体覆盖率（明文对比得出，非估算）
+  客户端上行消息(CS)           1020 条
+  服务端已映射 handler         732 条
+  完全未实现( CS )             288 条
+  空实现(有回包无逻辑)          17 个
+  协议定义完整度：客户端 2294 条 vs 服务端 proto 2299 条，仅差 3 个占位符（MSG_NONE/MIN/MAX）
+  ⇒ 协议定义不缺；缺的是 handler 与**消息里的字段填充**
+
+====================================================================================================
+【二】副本链路：字段级缺口（最优先）
+====================================================================================================
+
+  2.1 链路总览（消息号 → 谁发 → 我们做了什么）
+      10304 CS_StageStart        客户端请求开战（携带 stc_stage_id / is_auto / StageOther）
+      10305 SC_StageStart        服务端回战斗数据（StageBattle + StageOther）      ✅ 已实现，字段严重不全
+      10306 CS_StageInto         客户端提交上场单位（出生点 → 角色 id）           ✅ 已实现
+      10307 SC_StageInto         服务端确认进入战斗                                ✅ 已实现（空回）
+      10300 CS_StageUsableGuns   客户端要"可上场角色"                            ✅ 已实现
+      10301 SC_StageUsableGuns   回 lineup + lineup_guns                          ✅ 已实现
+      10311 SC_StageResult       服务端下发战斗结算                                ❌ 未实现
+      10324 SC_StageResultConfirm 服务端确认结算                                  ⚠️ 空实现(StageResultConfirm)
+
+  2.2 SC_StageStart.StageBattle —— 26 个字段，我们只填 4 个
+      ┌ 字段表（proto 明文）：
+        int64 id = 1;
+        uint32 stc_stage_id = 2;
+        JLHABLIBDCH stage_class = 3;
+        int64 random_seed = 4;
+        uint32 battle_level = 5;
+        FMMHAOHCKFN side = 7;
+        map<uint64, FMMHAOHCKFN> user_sides = 8;
+        repeated uint32 battle_enchantments = 6;
+        repeated OPADLDPIIKL camps = 9;
+        BattleResult result = 10;
+        bool auto = 11;
+        repeated SLGAddtionalEvent events = 12;
+        bool monster_offensive = 13;
+        uint32 extra_slg_undo_times = 14;
+        map<uint32, uint32> dz_property_value = 15;
+        bool predeployment_complated = 16;
+        uint32 leader_id = 17;
+        EALGLDFHEKN battle_type = 18;
+        repeated uint32 weapon_weak = 19;
+        repeated uint32 element_weak = 20;
+        uint32 formation_id = 21;
+        bool need_sync_formation = 22;
+        repeated uint32 sp_buff_choosen = 23;
+        bool is_pass = 24;
+        bool killed_chest_monster = 25;
+        ViceBattleInfo vice_battle_info_ = 26;
+            message SLGAddtionalEvent {
+            enum SLGAddtionalEventType {
+            message ViceBattleInfo {
+
+      ┌ 我们的填充情况（StageHandler.HandleStageStart）：
+        ✔ stc_stage_id(2)            已填（来自请求）
+        ✔ formation_id(21)          已填（固定 1，CustomFormationHandler）
+        ✔ leader_id(17)             已填（编队队长 gunId）
+        ⚠ camps(9)                  默认不填（GF2_STAGE_CAMPS=1 才发），且只发 Player0
+        ✘ side(7)                   未填 ← 单阵营数据，官方单人副本大概率必填
+        ✘ user_sides(8)             未填 ← map<uint64,side>，多队/多人
+        ✘ id(1)                     未填 ← 战斗唯一 id（存档/重连可能依赖）
+        ✘ stage_class(3)            未填 ← 关卡类型枚举（决定战斗规则）
+        ✘ random_seed(4)            未填 ← 随机种子（敌方行动/掉落）
+        ✘ battle_level(5)           未填 ← 战斗等级
+        ✘ battle_enchantments(6)    未填 ← 战斗词条
+        ✘ result(10)                未填 ← 结算阶段才用
+        ✘ auto(11)                  未填 ← 自动战斗标记
+        ✘ events(12)                未填 ← SLG 事件（沙盘）
+        ✘ monster_offensive(13)     未填 ← 怪物是否主动进攻
+        ✘ extra_slg_undo_times(14)  未填
+        ✘ dz_property_value(15)     未填 ← 暗区属性
+        ✘ predeployment_complated(16) 未填 ← 预部署完成标记（可能影响开场生成）
+        ✘ battle_type(18)           未填 ← 战斗类型
+        ✘ weapon_weak(19)/element_weak(20) 未填 ← 弱点表
+        ✘ need_sync_formation(22)   未填 ← 是否同步编队
+        ✘ sp_buff_choosen(23)       未填
+        ✘ is_pass(24)/killed_chest_monster(25) 未填
+        ✘ vice_battle_info(26)      未填 ← 副战斗信息（battle_level + 属性表）
+
+      建议：先补 side(7)+camps(9)+单位属性；random_seed/battle_level/stage_class 次之。
+
+  2.3 camps 元素 OPADLDPIIKL —— 21 个字段，我们只填 2 个
+        FMMHAOHCKFN KGMEBGGOOAM = 1;
+        repeated LECCHKLIOOK LBJLMGIPOJA = 2;
+        StageUav uav = 3 [deprecated = true];
+        DarkZoneGun DJFBDNMEONC = 10;
+        repeated uint32 NBOKCLIIIIE = 5;
+        repeated JPPLEFEAECH NFGCFGBGMCA = 7;
+        repeated CFMHGIMNBNN FBDLKMOOECN = 8;
+        int32 PDLDPKJJEND = 9;
+        BHMMIEBPEIK JCBELMKEKDL = 11;
+        map<int32, int32> FDOIABKHHNI = 12 [deprecated = true];
+        repeated uint32 AMMLMKFDGDK = 13;
+        map<int32, int32> DPLBEODKAAA = 14;
+        map<uint32, LECCHKLIOOK> HNBJJCCBKEI = 16;
+        map<uint32, uint32> BAKHGOHCBNK = 17;
+        repeated uint32 MINEPMBAMLO = 18;
+        map<uint32, InheritProperty> NJENFLBJMOG = 19;
+        map<int32, int32> NEGGGHNLNCK = 20;
+        repeated DarkZoneInteractionData JDHNOJFJMEO = 21;
+            message LECCHKLIOOK {
+
+      ┌ 我们的填充情况：
+        ✔ KGMEBGGOOAM(1)   阵营（Player0）
+        ✔ NFGCFGBGMCA(7)   上场单位列表
+        ✘ LBJLMGIPOJA(2)   ★ 槽位列表（LECCHKLIOOK）—— 很可能是"谁站哪个出生点"的真结构
+        ✘ NBOKCLIIIIE(5) / FBDLKMOOECN(8) / PDLDPKJJEND(9) / JCBELMKEKDL(11) 未填
+        ✘ AMMLMKFDGDK(13) / MINEPMBAMLO(18) 未填（repeated uint32）
+        ✘ HNBJJCCBKEI(16) / BAKHGOHCBNK(17) / NJENFLBJMOG(19) 未填（map）
+        ✘ FDOIABKHHNI(12) / DPLBEODKAAA(14) / NEGGGHNLNCK(20) 未填（属性 map）
+        ✘ JDHNOJFJMEO(21) 未填（暗区交互）
+
+  2.4 上场单位 JPPLEFEAECH —— 12 个字段，我们只填 4 个
+        Gun JEKFJDDLGOO = 1;
+        uint32 OGEOEEBNDEP = 2;
+        string GCAABEBJHFL = 3;
+        Property GDLFJIJOMAL = 10;
+        InheritProperty GMGBDEJMNDH = 12;
+        JIMAFEACOOO DFMNIMCOHAC = 11;
+        JJDFAPAKPPG JLFGNEGPLEJ = 22;
+        JJDFAPAKPPG JHLCFLBLEMG = 23;
+        AssistantInfo.AssistantType type = 20;
+        BinaryUser other = 21;
+        uint32 sequence = 24;
+        uint64 uid = 25;
+        repeated uint32 buff_id = 26;
+
+      ┌ 我们的填充情况：
+        ✔ JEKFJDDLGOO(1)   Gun 完整数据（ToProtoGunCharacter）
+        ✔ sequence(24)     序号
+        ✔ uid(25)          我们填的是**出生点 id**（猜测，可能应为玩家/单位 uid）
+        ⚠ GCAABEBJHFL(3)   我们塞了出生点坐标字符串（字段名未知，属猜测）
+        ✘ Property(10)     ★★ 属性（生命/攻击/防御…）—— 缺失最可能导致单位不实例化
+        ✘ InheritProperty(12) ★★ 继承属性
+        ✘ OGEOEEBNDEP(2) / DFMNIMCOHAC(11) / JLFGNEGPLEJ(22) / JHLCFLBLEMG(23) 未填
+        ✘ type(20) / other(21) / buff_id(26) 未填
+
+  2.5 结算链路（完全缺失）
+      SC_StageResult(10311)：
+        uint32 stage_id = 1;
+        BattleResult battle_result = 9;
+        uint32 old_ccs = 10;
+        uint32 new_ccs = 11;
+        StageOther stage_other = 12;
+        repeated UserDropCache other_drop = 5;
+        repeated UserDropCache challenge_drop = 6;
+        repeated UserDropCache first_drop = 7;
+        StageTotalDrop drops = 8;
+        SpecialDrop special_drop = 13;
+        PDLFAKBOKHG EMFPGPBKEKD = 15;
+        uint32 KKLABAKPAPI = 16;
+      StageResult / BattleResult 结构：
+        (proto 中无此消息定义)
+      SC_StageResultConfirm(10324)：
+        (消息为空，无字段)
+      实现要点：结算要回 star/评分 + 奖励列表（repeated reward），
+                并在 CS 侧接收客户端确认后再落库，否则打完不结算、奖励不发放。
+
+====================================================================================================
+【三】17 个空实现（有回包、无逻辑）—— 逐个给出所需字段
+====================================================================================================
+
+  ▶ CS_StageResultConfirm
+    请求字段：
+      uint32 stage_id = 1;
+      bool JJBLBEMKJMC = 2;
+    应回字段（SC_StageResultConfirm）：
+      (消息为空，无字段)
+
+  ▶ CS_ExGetThemesInfo
+    请求字段：
+      (消息为空，无字段)
+    应回字段（SC_ExGetThemesInfo）：
+      JIOOMAOFEMF info = 1;
+
+  ▶ CS_CampFiles
+    请求字段：
+      (消息为空，无字段)
+    应回字段（SC_CampFiles）：
+      map<uint32, bool> camp_files = 1;
+
+  ▶ CS_ChapterHeroMode
+    请求字段：
+      uint32 chapter_id = 1;
+      bool COFDFFJMNMA = 2;
+    应回字段（SC_ChapterHeroMode）：
+      repeated uint32 chapter_id = 1;
+      bool COFDFFJMNMA = 2;
+
+  ▶ CS_ReadNewDailyQuest
+    请求字段：
+      repeated uint32 read_daily_quest = 1;
+    应回字段（SC_ReadNewDailyQuest）：
+      repeated uint32 read_daily_quest = 1;
+
+  ▶ CS_ThemeInspirationCollectionInfo
+    请求字段：
+      option deprecated = true;
+      uint32 theme_id = 1;
+    应回字段（SC_ThemeInspirationCollectionInfo）：
+      option deprecated = true;
+      uint32 LCBAIHPPGOI = 1;
+      map<uint32, uint32> record = 2;
+      repeated HFKKJLDANMK LNMPPMMMBLH = 3;
+      uint32 theme_id = 4;
+
+  ▶ CS_ThemeYunTuInfo
+    请求字段：
+      uint32 theme_id = 1;
+    应回字段（SC_ThemeYunTuInfo）：
+      uint32 theme_id = 1;
+      ADJMEGKGDBF data = 2;
+
+  ▶ CS_TargetBossGetRank
+    请求字段：
+      uint32 LLDODHHKBPN = 1;
+      bool JDLBJCFHJNN = 2;
+      uint32 LLJNHLLCBIP = 3;
+      uint32 JIPOFLLIHOJ = 4;
+      DLFLCMJBBDI type = 5;
+    应回字段（SC_TargetBossGetRank）：
+      uint32 LLDODHHKBPN = 1;
+      NFJNKLAHGIK GCLDHPJODII = 2;
+      repeated NFJNKLAHGIK DNPAFOIANGG = 3;
+      uint32 LLJNHLLCBIP = 4;
+      uint32 EDNJOLMGLJD = 5;
+      DLFLCMJBBDI type = 6;
+
+  ▶ CS_EventEndlessTowerInfo
+    请求字段：
+      uint32 EPCCANNLACO = 1 [deprecated = true];
+      uint32 IKDMNOBMIFE = 2;
+    应回字段（SC_EventEndlessTowerInfo）：
+      FCDLKJNBDGM IHNCKKDOJLL = 1;
+      uint32 BAHFCLJGBDN = 2;
+
+  ▶ CS_DungeonActivityInfo
+    请求字段：
+      option deprecated = true;
+      uint32 theme_id = 1;
+    应回字段（SC_DungeonActivityInfo）：
+      option deprecated = true;
+      map<uint32, JOGJMEAAMMH> GAMJCDNGFPJ = 1;
+      repeated GKGBHAHFKPG BOLJLDDFGPA = 2 [deprecated = true];
+
+  ▶ CS_HighPvpInfo
+    请求字段：
+      option deprecated = true;
+    应回字段（SC_HighPvpInfo）：
+      option deprecated = true;
+      KIJAGFEHHLM rank = 1;
+      uint32 curr_level = 2;
+      HKDBBLJCPIF MMHJJHLFCPA = 3;
+      FIGKLONLBJG season_settle = 4;
+      uint32 BIIGOKCCKNI = 5;
+      map<uint32, PPMIFGKKNPN> GINALDHFAFJ = 6;
+      repeated uint64 BDLOFKCEEEG = 7;
+
+  ▶ CS_AsyncPvpOpponentDailyRefresh
+    请求字段：
+      (消息为空，无字段)
+    应回字段（SC_AsyncPvpOpponentDailyRefresh）：
+      bool PEPGBOMKNCN = 1;
+
+  ▶ CS_FriendGuildInviteOperation
+    请求字段：
+      option deprecated = true;
+      uint64 uid = 1;
+      int64 CEBDNPMCFCO = 2;
+      bool CADLKBMDCMC = 3;
+    应回字段（SC_FriendGuildInviteOperation）：
+      option deprecated = true;
+      uint64 uid = 1;
+      ChatMessage message = 2;
+      HNINDAOJCKP code = 3;
+
+  ▶ CS_GuildWarIndividualRewardsV2
+    请求字段：
+      uint32 EPCCANNLACO = 1;
+    应回字段（SC_GuildWarIndividualRewardsV2）：
+      uint32 EPCCANNLACO = 1;
+      repeated uint32 reward_ids = 2;
+      map<uint32, PICFIDHJEHA> KMNJPNMEDGC = 3;
+      map<uint32, uint32> PCICBIOEPLA = 4;
+
+  ▶ CS_AccountCustomize
+    请求字段：
+      uint32 level = 1;
+    应回字段（SC_AccountCustomize）：
+      uint32 err = 1;
+
+  ▶ CS_UpdateSettingGacheAutoShare
+    请求字段：
+      bool FKBNIHBEJME = 1;
+    应回字段（SC_UpdateSettingGacheAutoShare）：
+      bool FKBNIHBEJME = 1;
+
+  ▶ CS_QueryNameCardGameplayOptions
+    请求字段：
+      bool ELEJLKDILCB = 1;
+    应回字段（SC_QueryNameCardGameplayOptions）：
+      repeated GMFPDBFCLFC EABFOMIKCDM = 1;
+      repeated uint32 GPDFKEMELKI = 2;
+
+====================================================================================================
+【四】288 条未实现消息（按功能族分组，每条带请求/响应字段）
+====================================================================================================
+
+------------------------------------------------------------------------------------------------
+  【Lounge】休息室/大厅互动 —— 缺 15 条
+------------------------------------------------------------------------------------------------
+    ▸ 12000  CS_Lounge
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12008  CS_LoungeDatingAction
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12010  CS_LoungeSendLetter
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12013  CS_LoungeTouch
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12015  CS_LoungeStartAction
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12017  CS_LoungePlaceFurniture
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12020  CS_LoungeGetFurnitures
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12022  CS_LoungeInviteLeave
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12024  CS_LoungeMark
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12029  CS_LoungeGetGiftTask
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12031  CS_LoungeDatingGift
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12033  CS_LoungeInviteState
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12036  CS_LoungeChangeClothes
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12038  CS_LoungeInteraction
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12040  CS_LoungeUnlockRoom
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Rouge】肉鸽模式 —— 缺 14 条
+------------------------------------------------------------------------------------------------
+    ▸ 21720  CS_RougeMapSync
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21725  CS_RougeSelectNodeChoose
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21727  CS_RougeSupplyNodeChoose
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21729  CS_RougeBattleNodeChoose
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21731  CS_RougeShopNodeChoose
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21733  CS_RougeGetReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21736  CS_RougeChooseChipReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21739  CS_RougeEnterNode
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21741  CS_RougeExitNode
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21743  CS_RougeGameReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 21744  CS_RougeStartMap
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 23107  CS_RougeNodeOpen
+        请求: uint32 id = 1;; uint32 plan_id = 2;
+        响应: ODFMONHCBIO GCMADDJNGMI = 1;; uint32 plan_id = 2;
+    ▸ 23109  CS_RougeNodeInteract
+        请求: uint32 id = 1;; uint32 LJJEFHEDHLB = 2;; uint32 KBJHHBCEPLB = 3;; uint32 plan_id = 4;
+        响应: ODFMONHCBIO GCMADDJNGMI = 1;; uint32 plan_id = 2;
+    ▸ 23123  CS_RougeNodePreview
+        请求: uint32 id = 1;; uint32 plan_id = 2;
+        响应: ODFMONHCBIO GCMADDJNGMI = 1;; uint32 plan_id = 2;
+
+------------------------------------------------------------------------------------------------
+  【Kitty】猫咪小游戏 —— 缺 12 条
+------------------------------------------------------------------------------------------------
+    ▸ 23130  CS_KittyCafeInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; NPJAMJCBFHJ info = 2;
+    ▸ 23132  CS_KittyCafeMakeCoffee
+        请求: uint32 theme_id = 1;; uint32 npc_id = 2;
+        响应: uint32 theme_id = 1;; uint32 npc_id = 2;
+    ▸ 23134  CS_KittyCafeUnlockCat
+        请求: uint32 theme_id = 1;; uint32 NPBMHHBMDOB = 2;; repeated int32 items = 3;
+        响应: uint32 theme_id = 1;; uint32 IAJBKCDNMHP = 2;
+    ▸ 23136  CS_KittyCafeSetStaff
+        请求: uint32 theme_id = 1;; repeated uint32 JGDCACENMLA = 2;
+        响应: uint32 theme_id = 1;; repeated uint32 JGDCACENMLA = 2;
+    ▸ 23140  CS_KittyCafe2Info
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; CEPAACNIEFJ info = 2;
+    ▸ 23142  CS_KittyCafe2UnlockCat
+        请求: uint32 theme_id = 1;; uint32 NPBMHHBMDOB = 2;
+        响应: uint32 theme_id = 1;; uint32 IAJBKCDNMHP = 2;
+    ▸ 23144  CS_KittyCafe2SetStaff
+        请求: uint32 theme_id = 1;; map<uint32, uint32> PHBAIKNKJHD = 2;
+        响应: uint32 theme_id = 1;; map<uint32, uint32> PHBAIKNKJHD = 2;
+    ▸ 23147  CS_KittyCafe2SettleLevel
+        请求: uint32 theme_id = 1;; uint32 MCKEKMMKFFA = 2;; repeated uint32 GELKILFIPIJ = 3;; map<uint32, GADPAFDKNBH> OELCKIGPJMB = 4;
+        响应: uint32 theme_id = 1;; uint32 MCKEKMMKFFA = 2;; repeated uint32 EPLMNDJKKMP = 3;
+    ▸ 23149  CS_KittyCafe2CollectionReward
+        请求: uint32 theme_id = 1;; repeated uint32 BBLDGAPOFBO = 2;
+        响应: uint32 theme_id = 1;; map<uint32, bool> OEPHLBHMBCM = 2;; map<uint32, uint32> LKKDJMINFOG = 3;
+    ▸ 23152  CS_KittyCafe2SettleDailyLevel
+        请求: uint32 theme_id = 1;; uint32 CAMJNNMNMMG = 2;; repeated uint32 OELCKIGPJMB = 3;; double DIIMKPBOHAF = 4;
+        响应: uint32 theme_id = 1;
+    ▸ 23154  CS_KittyCafe2AllCollectionReward
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;
+    ▸ 23163  CS_KittyCafe2InterfaceWithCat
+        请求: uint32 theme_id = 1;; uint32 NPBMHHBMDOB = 2;
+        响应: uint32 theme_id = 1;; uint32 NPBMHHBMDOB = 2;; int64 INIGCPPONHP = 3;; map<uint32, uint32> rewards = 4;
+
+------------------------------------------------------------------------------------------------
+  【Get】（Get 开头） —— 缺 11 条
+------------------------------------------------------------------------------------------------
+    ▸ 10159  CS_GetCareRewards
+        请求: uint32 reward_id = 1;
+        响应: uint32 reward_id = 1;
+    ▸ 10485  CS_GetGachaOptionalReward
+        请求: uint32 id = 1;
+        响应: uint32 id = 1;
+    ▸ 10927  CS_GetAvgRewards
+        请求: uint32 avg_id = 1;
+        响应: uint32 avg_id = 1;; map<uint32, uint32> rewards = 2;
+    ▸ 11715  CS_GetRobotChat
+        请求: (空消息)
+        响应: RobotChats robot_chat = 1;
+    ▸ 12302  CS_GetBattlepassReward
+        请求: BattlepassType type = 1;; uint32 reward_level = 2;; BpRewardGetType reward_type = 4;; map<uint32, JMAEFBJLBAC> OOHCIIFGABF = 5;; map<uint32, JMAEFBJLBAC> EDKCBGOCEGB = 6;
+        响应: BattlepassType type = 1;; uint32 reward_level = 2;; uint32 left_reward_num = 4;; BpRewardGetType reward_type = 5;
+    ▸ 12331  CS_GetBattlepassInfoTimeLimit
+        请求: (空消息)
+        响应: Battlepass battlepass = 1;; int64 share_expire = 2 [deprecated = true];
+    ▸ 12333  CS_GetBattlepassRewardTimeLimit
+        请求: BattlepassType type = 1;; uint32 reward_level = 2;; BpRewardGetType reward_type = 4;; map<uint32, JMAEFBJLBAC> OOHCIIFGABF = 5;; map<uint32, JMAEFBJLBAC> EDKCBGOCEGB = 6;
+        响应: BattlepassType type = 1;; uint32 reward_level = 2;; uint32 left_reward_num = 4;; BpRewardGetType reward_type = 5;
+    ▸ 12556  CS_GetMiniGameInfo
+        请求: uint32 id = 1;
+        响应: NIPCKNMLFAK DMANPLMCCPG = 1;; map<uint32, CIPEIDNGGEJ> DAJJGHEKODD = 2;
+    ▸ 12572  CS_GetDispatchReward
+        请求: uint32 id = 1;; uint32 task_id = 2;; int32 index = 3;
+        响应: Store task = 1;
+    ▸ 21701  CS_GetGradeInfo
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 22210  CS_GetDungeonInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 OHPHNKCEGCM = 2;
+        响应: option deprecated = true;; NDAENPPJNIB KPDINJGFBDG = 1;
+
+------------------------------------------------------------------------------------------------
+  【Sand】沙盘/大地图SLG —— 缺 11 条
+------------------------------------------------------------------------------------------------
+    ▸ 21400  CS_SandBoxInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; BGHIBIHAHGM info = 1 [deprecated = true];
+    ▸ 21402  CS_SandBoxSetContract
+        请求: option deprecated = true;; uint32 theme_id = 1;; repeated uint32 GGOLBAILKIO = 2;; uint32 LBNHBMFFFJI = 3;
+        响应: option deprecated = true;; repeated uint32 GGOLBAILKIO = 1 [deprecated = true];; uint32 LBNHBMFFFJI = 2;; int64 end_time = 3 [deprecated = true];; OperationPlan PCNAGEAAFIJ = 4;
+    ▸ 21404  CS_SandBoxOccupyGrid
+        请求: option deprecated = true;; uint32 theme_id = 1;; repeated uint32 LBNHBMFFFJI = 2;
+        响应: option deprecated = true;; uint32 theme_id = 1;; repeated uint32 LBNHBMFFFJI = 2;
+    ▸ 21406  CS_SandBoxTicketMove
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;; repeated uint32 KAONDFBDDLD = 3;
+        响应: option deprecated = true;; uint32 theme_id = 1;; repeated FAKJNAIKMGJ KAONDFBDDLD = 2;;     message EMCAKNNGKEN {;     enum NEIDFFCOMKP {;     message NPNAPNLOPCC {;     message KFOJEKJENEI {;     message LLJNKJJLEPL {
+              …共 9 个字段
+    ▸ 21408  CS_SandBoxRaid
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;; uint32 IIJGACGAEAO = 3;
+        响应: option deprecated = true;; StageTotalDrop drop = 1;
+    ▸ 21410  CS_SandBoxContractSettle
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;
+        响应: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;
+    ▸ 21413  CS_SandBoxTicketStart
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;
+        响应: option deprecated = true;; DGJCCKEODNN JEKAHKHMHJM = 1;
+    ▸ 21415  CS_SandBoxTicketReset
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;
+        响应: option deprecated = true;; DGJCCKEODNN JEKAHKHMHJM = 1;
+    ▸ 21418  CS_SandBoxTakeChallengeReward
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;; repeated uint32 task_id = 3 [deprecated = true];; repeated uint32 MLOGHBFDFLI = 4;
+        响应: option deprecated = true;; repeated uint32 task_id = 1 [deprecated = true];; uint32 theme_id = 2;; uint32 LBNHBMFFFJI = 3;; repeated uint32 MLOGHBFDFLI = 4;
+    ▸ 21426  CS_SandBoxGetRank
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;; bool JDLBJCFHJNN = 3;; uint32 LLJNHLLCBIP = 4;; uint32 JIPOFLLIHOJ = 5;
+        响应: option deprecated = true;; uint64 uid = 1 [deprecated = true];; uint32 IKDMNOBMIFE = 2 [deprecated = true];; uint32 LBNHBMFFFJI = 3;; BLKLIJGMNCG GCLDHPJODII = 4;; repeated BLKLIJGMNCG DNPAFOIANGG = 5;; uint32 LLJNHLLCBIP = 6;
+    ▸ 21428  CS_SandBoxTakeRankReward
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 LBNHBMFFFJI = 2;
+        响应: option deprecated = true;; uint32 LBNHBMFFFJI = 1;
+
+------------------------------------------------------------------------------------------------
+  【Guild】公会 —— 缺 10 条
+------------------------------------------------------------------------------------------------
+    ▸ 21970  CS_GuildWarChooseInfo
+        请求: uint32 EPCCANNLACO = 1;
+        响应: uint32 EPCCANNLACO = 1;; uint32 phase_id = 2;; uint32 AELCJIDJPCB = 3;; uint32 MLHNBJOHAHK = 4;; map<uint32, uint32> PCDNOLBEHOM = 5;; map<uint32, uint32> DPBEBMJHFLO = 6;; map<uint32, DECPDDBMLKB> MPBPMJOCFFM = 7;; repeated DPFFHEHCAFF GAHKOGOCKLE = 8;
+              …共 12 个字段
+    ▸ 21972  CS_GuildWarChooseUpdate
+        请求: uint32 EPCCANNLACO = 1;; uint32 AELCJIDJPCB = 2;
+        响应: uint32 EPCCANNLACO = 1;; uint32 phase_id = 2;; uint32 AELCJIDJPCB = 3;; uint32 MLHNBJOHAHK = 4;; map<uint32, uint32> PCDNOLBEHOM = 5;
+    ▸ 21980  CS_GuildWarExploreInfo
+        请求: uint32 EPCCANNLACO = 1;
+        响应: uint32 EPCCANNLACO = 1;; bool CKHBBAMNGDF = 2;; uint32 area_id = 3;; repeated uint32 CGIECIHKEBP = 4;; map<uint32, uint32> GPHMGKGKOMI = 6;
+    ▸ 21982  CS_GuildWarExploreStart
+        请求: uint32 EPCCANNLACO = 1;; uint32 area_id = 2;; bool KIINPNOKMII = 3;
+        响应: uint32 EPCCANNLACO = 1;; BGPDHBGLJCG KCFKDMINJKI = 2;
+    ▸ 21984  CS_GuildWarExploreOp
+        请求: uint32 EPCCANNLACO = 1;; COCFIHHCPFM op = 2;
+        响应: uint32 EPCCANNLACO = 1;; HBDFMLJCDCE.LJPDGAGOLOB code = 2;; repeated HBDFMLJCDCE ODHHLKDKIPH = 3;
+    ▸ 22089  CS_GuildWarExploreStartV2
+        请求: uint32 EPCCANNLACO = 1;; uint32 area_id = 2;; bool KIINPNOKMII = 3;
+        响应: uint32 EPCCANNLACO = 1;; BGPDHBGLJCG KCFKDMINJKI = 2;; bool CILFANIMAPD = 3;
+    ▸ 22091  CS_GuildWarExploreOpV2
+        请求: uint32 EPCCANNLACO = 1;; COCFIHHCPFM op = 2;
+        响应: uint32 EPCCANNLACO = 1;; HBDFMLJCDCE.LJPDGAGOLOB code = 2;; repeated HBDFMLJCDCE ODHHLKDKIPH = 3;
+    ▸ 22121  CS_GuildWarChooseInfoV2
+        请求: uint32 EPCCANNLACO = 1;
+        响应: uint32 EPCCANNLACO = 1;; uint32 phase_id = 2;; uint32 AELCJIDJPCB = 3;; uint32 MLHNBJOHAHK = 4;; map<uint32, uint32> PCDNOLBEHOM = 5;; map<uint32, uint32> DPBEBMJHFLO = 6;; map<uint32, DECPDDBMLKB> MPBPMJOCFFM = 7;; repeated DPFFHEHCAFF GAHKOGOCKLE = 8;
+              …共 12 个字段
+    ▸ 22123  CS_GuildWarChooseUpdateV2
+        请求: uint32 EPCCANNLACO = 1;; uint32 AELCJIDJPCB = 2;
+        响应: uint32 EPCCANNLACO = 1;; uint32 phase_id = 2;; uint32 AELCJIDJPCB = 3;; uint32 MLHNBJOHAHK = 4;; map<uint32, uint32> PCDNOLBEHOM = 5;
+    ▸ 22131  CS_GuildWarExploreInfoV2
+        请求: uint32 EPCCANNLACO = 1;
+        响应: uint32 EPCCANNLACO = 1;; bool CKHBBAMNGDF = 2;; uint32 area_id = 3;; repeated uint32 CGIECIHKEBP = 4;; map<uint32, uint32> GPHMGKGKOMI = 6;
+
+------------------------------------------------------------------------------------------------
+  【Mod】改装/改装槽 —— 缺 9 条
+------------------------------------------------------------------------------------------------
+    ▸ 10108  CS_ModPortraitFrame
+        请求: uint32 portrait_frame = 1;
+        响应: uint32 portrait_frame = 1;
+    ▸ 10112  CS_ModPlayerMotto
+        请求: string player_motto = 1;; KHLDHBPIANC IPEGJFMEDIM = 10;
+        响应: string player_motto = 1;
+    ▸ 10114  CS_ModPortrait
+        请求: uint32 portrait = 1;
+        响应: uint32 portrait = 1;
+    ▸ 10116  CS_ModName
+        请求: string name = 1;; KHLDHBPIANC IPEGJFMEDIM = 10;
+        响应: string name = 1;
+    ▸ 10118  CS_ModSex
+        请求: Sex sex = 1;; uint32 item_id = 2;; uint32 num = 3;
+        响应: Sex sex = 2;
+    ▸ 10120  CS_ModBirthday
+        请求: uint32 birthday = 1;
+        响应: uint32 birthday = 1;
+    ▸ 10122  CS_ModMetal
+        请求: uint32 metal = 1;
+        响应: uint32 metal = 1;
+    ▸ 10135  CS_ModBackgroundCard
+        请求: uint32 id = 1;
+        响应: uint32 id = 1;
+    ▸ 10155  CS_ModBirthdayHide
+        请求: bool CJIMFIJEJKL = 1;
+        响应: bool CJIMFIJEJKL = 1;
+
+------------------------------------------------------------------------------------------------
+  【Dorm】宿舍 —— 缺 9 条
+------------------------------------------------------------------------------------------------
+    ▸ 11600  CS_Dorm
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11602  CS_DormBindCharacter
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11604  CS_DormUnlock
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11606  CS_DormUpgrade
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11608  CS_DormSendGift
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11610  CS_DormDialogue
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11612  CS_DormCostume
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11614  CS_DormPlotRecord
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11616  CS_DormDecoration
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Client】（Client 开头） —— 缺 9 条
+------------------------------------------------------------------------------------------------
+    ▸ 20201  CS_ClientCreateRoom
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20203  CS_ClientJoinRoom
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20205  CS_ClientLeaveRoom
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20207  CS_ClientMemberReady
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20209  CS_ClientMemberKick
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20211  CS_ClientStartBattle
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20213  CS_ClientRoomList
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20215  CS_ClientRoomInfo
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20219  CS_ClientChooseGun
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Monopoly】大富翁活动 —— 缺 7 条
+------------------------------------------------------------------------------------------------
+    ▸ 12408  CS_MonopolyInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; AGICECCMFHF DOKKKNPGHLO = 1;; map<uint32, NDOAMGPBNND> BNHACGOIJKN = 2;; uint32 map_id = 3;; repeated uint32 HEEPNEIKFMN = 4;; map<uint32, uint32> PBFALEOCOFE = 5;; repeated Item OEPHLBHMBCM = 6;; map<uint32, AGICECCMFHF> DIPHLGDEIED = 7;
+              …共 9 个字段
+    ▸ 12424  CS_MonopolyStart
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 stage_id = 2;; uint32 map_id = 3;; map<uint32, uint32> PBFALEOCOFE = 4;
+        响应: option deprecated = true;; uint32 theme_id = 1;; GIGGGLFKCEO room = 2;
+    ▸ 12426  CS_MonopolyOp
+        请求: option deprecated = true;; OADEOIMOHKE op = 1;
+        响应: option deprecated = true;; OADEOIMOHKE.KNKFOMPPJEG code = 1;
+    ▸ 12431  CS_MonopolyRestore
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; LANPJCEFNEH map = 2;; GIGGGLFKCEO room = 3;
+    ▸ 12433  CS_MonopolyClose
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;
+    ▸ 12437  CS_MonopolySettle
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 stage_id = 2;
+        响应: option deprecated = true;; uint32 theme_id = 1;; uint32 stage_id = 2;; GIGGGLFKCEO.EBICDIFODLB status = 3;; map<uint32, bool> GLDOPDIBPDJ = 4;; map<uint32, uint32> ONEDHEFENHD = 5;; bool OBPJDCNHENB = 6;; uint32 AMIGAEOGLJC = 7;
+              …共 10 个字段
+    ▸ 12438  CS_MonopolyRaid
+        请求: option deprecated = true;; uint32 stage_id = 1;; uint32 PBJFCONNMBB = 3;; uint32 theme_id = 4;
+        响应: option deprecated = true;; uint32 stage_id = 1;; map<uint32, uint32> drops = 2;; uint32 PBJFCONNMBB = 3;
+
+------------------------------------------------------------------------------------------------
+  【Theme】主题 —— 缺 6 条
+------------------------------------------------------------------------------------------------
+    ▸ 12398  CS_ThemeCheckInQuestionInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; repeated uint32 questions = 1;; uint32 points_summary = 2;; map<uint32, bool> phase_reward = 3;; uint32 theme_id = 4;
+    ▸ 12400  CS_ThemeActivityInfo
+        请求: option deprecated = true;; uint32 id = 1;
+        响应: option deprecated = true;; repeated uint32 questions = 1;; uint32 points_summary = 2;; map<uint32, bool> phase_reward = 3;; uint32 LCBAIHPPGOI = 4;; map<uint32, uint32> record = 5;; repeated HFKKJLDANMK LNMPPMMMBLH = 6;; uint32 theme_id = 7;
+    ▸ 12402  CS_ThemeAnswerQuestion
+        请求: option deprecated = true;; uint32 id = 1;; map<uint32, bool> question = 2;
+        响应: option deprecated = true;; uint32 id = 1;; map<uint32, bool> question = 2;
+    ▸ 23254  CS_ThemeMiniGameFinish
+        请求: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;; uint32 stage_id = 3;; uint32 duration = 4;; uint32 score = 5;;     oneof ACCAAKAHCAF {;     message GJNLNJJFOLC {;     message EMFFKBDBBLP {
+              …共 12 个字段
+        响应: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;; uint32 stage_id = 3;; uint32 score = 4;; uint32 CGFMBCCDFPG = 5;; repeated uint32 unlock_stage = 6;;     oneof IGAHJGMJKFF {;     message NCFKOINMGGF {
+              …共 13 个字段
+    ▸ 23258  CS_ThemeMiniGameRank
+        请求: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;; FINOMBLLHHG OCGNAONELAA = 3;; repeated uint64 IBOOHICHJGC = 4;;     enum FINOMBLLHHG {
+        响应: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;; IGHPEHHAANA OCGNAONELAA = 3;; repeated NEOMHANHBEM JADNNNNIIMB = 4;;     enum IGHPEHHAANA {
+    ▸ 23262  CS_ThemeMiniGameRecordRedPoint
+        请求: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;;     oneof AKIOBMAEOBG {
+        响应: uint32 theme_id = 1;; uint32 FNEFKKLJMDN = 2;;     oneof PABFPJKFKEJ {
+
+------------------------------------------------------------------------------------------------
+  【Activity】活动框架 —— 缺 6 条
+------------------------------------------------------------------------------------------------
+    ▸ 12605  CS_ActivityPaidSigninGetInfo
+        请求: repeated uint32 BDINMNMOOGL = 1;
+        响应: repeated NJBCAAHOLBO HBNFOKFOOMO = 1;
+    ▸ 12609  CS_ActivityPaidSigninClaimReward
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 reward_id = 2;
+        响应: NJBCAAHOLBO HBNFOKFOOMO = 1;
+    ▸ 12611  CS_ActivityPaidSigninClaimAllRewards
+        请求: uint32 IKDMNOBMIFE = 1;
+        响应: NJBCAAHOLBO HBNFOKFOOMO = 1;
+    ▸ 12618  CS_ActivityThreeDimensionsAmoGetInfo
+        请求: uint32 IKDMNOBMIFE = 1;
+        响应: uint32 IKDMNOBMIFE = 1;; JOBMDFAEAEE OFLLFNJOIOA = 2;
+    ▸ 12620  CS_ActivityThreeDimensionsAmoGetReward
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 KNMAPOCKMCJ = 2;
+        响应: uint32 IKDMNOBMIFE = 1;; uint32 KNMAPOCKMCJ = 2;
+    ▸ 12622  CS_ActivityThreeDimensionsAmoGetSpecialReward
+        请求: uint32 IKDMNOBMIFE = 1;
+        响应: uint32 IKDMNOBMIFE = 1;
+
+------------------------------------------------------------------------------------------------
+  【Battle】战斗辅助 —— 缺 6 条
+------------------------------------------------------------------------------------------------
+    ▸ 20701  CS_BattleLogin
+        请求: uint64 uid = 1;; uint64 battle_id = 2;; string token = 3;
+        响应: NGMHEFFFKED PPCNJLFKDHA = 1;; int64 MCCLKFALMGM = 2;
+    ▸ 20703  CS_BattleLoading
+        请求: uint64 battle_id = 1;; uint32 KKLABAKPAPI = 2;; bool JONLCAGBGJE = 3;
+        响应: repeated BINLCPENJBP users = 1;
+    ▸ 20707  CS_BattleHeartBeat
+        请求: (空消息)
+        响应: (空消息)
+    ▸ 20709  CS_BattleDeploymentModification
+        请求: repeated MCCEAPPDBGA CKLLNOJHKFN = 1;; bool JONLCAGBGJE = 2;
+        响应: (proto 中无定义)
+    ▸ 20712  CS_BattlePlayerReadyForAction
+        请求: uint64 GNONOPGMIFC = 1;
+        响应: (proto 中无定义)
+    ▸ 20713  CS_BattlePlayerAction
+        请求: uint64 GNONOPGMIFC = 1;; NBCOP op = 2;
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Support】助战 —— 缺 6 条
+------------------------------------------------------------------------------------------------
+    ▸ 22047  CS_SupportFormationModify
+        请求: uint32 id = 1;; uint32 slot = 2;; uint32 COCHLPMJPOJ = 3;
+        响应: uint32 id = 1;; OMBHFHECHOO FOAHOCCEHMB = 2;
+    ▸ 22049  CS_SupportFormationModifyName
+        请求: uint32 id = 1;; string name = 2;; KHLDHBPIANC IPEGJFMEDIM = 3;
+        响应: uint32 id = 1;; string name = 2;
+    ▸ 22051  CS_SupportFormationAmmunitionSequence
+        请求: uint32 id = 1;; uint32 slot = 2;; repeated uint32 JIHKJNEPGBB = 3;
+        响应: uint32 id = 1;; uint32 slot = 2;; repeated uint32 JIHKJNEPGBB = 3;
+    ▸ 22053  CS_SupportFormationModifyBaseChip
+        请求: uint32 id = 1;; map<uint32, DKIBNBANDLM> JELCIHPBECA = 2;
+        响应: uint32 id = 1;; map<uint32, DKIBNBANDLM> JELCIHPBECA = 2;
+    ▸ 22055  CS_SupportFormationModifyCoreChip
+        请求: uint32 id = 1;; repeated uint32 JHCLPBBJDFH = 4;
+        响应: uint32 id = 1;; repeated uint32 ENFCKIOLJNM = 2;
+    ▸ 22081  CS_SupportFormationSetBattleFormationId
+        请求: uint32 id = 1;
+        响应: uint32 id = 1;
+
+------------------------------------------------------------------------------------------------
+  【Rich】养成 —— 缺 6 条
+------------------------------------------------------------------------------------------------
+    ▸ 23000  CS_RichManData
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; KMOMJFOFEDD.IGCLEIEPMLE data = 2;
+    ▸ 23002  CS_RichManStartGame
+        请求: uint32 theme_id = 1;; uint32 stage_id = 2;; uint32 gun_id = 3 [deprecated = true];; uint32 MPKEPPDEGEE = 4;
+        响应: uint32 theme_id = 1;; KMOMJFOFEDD.MKDBDBMAKDH room = 2;
+    ▸ 23004  CS_RichManResume
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; KMOMJFOFEDD.MKDBDBMAKDH room = 2;
+    ▸ 23006  CS_RichManSettleGame
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; int32 LPGIKNAIEMB = 2;; int32 score = 3 [deprecated = true];; uint32 stage_id = 4;; uint32 gun_id = 5 [deprecated = true];; int32 rank = 6 [deprecated = true];; int32 HGNPJOLACNN = 7;; map<uint32, int32> NBMABIMGIMJ = 8;
+              …共 10 个字段
+    ▸ 23008  CS_RichManCmd
+        请求: uint32 theme_id = 1;; KMOMJFOFEDD.IMEGLPCEECE op = 2;
+        响应: KMOMJFOFEDD.LIBHFHIMBHF code = 1;
+    ▸ 23012  CS_RichManRank
+        请求: uint32 theme_id = 1;; repeated uint64 HGFFGBMBIOD = 2;
+        响应: uint32 theme_id = 1;; repeated NEOMHANHBEM GDCGGJHIAKH = 2;
+
+------------------------------------------------------------------------------------------------
+  【Take】（Take 开头） —— 缺 5 条
+------------------------------------------------------------------------------------------------
+    ▸ 11302  CS_TakeAchieveRewards
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11306  CS_TakeAchieveTagReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 12404  CS_TakeWarmUpPhaseReward
+        请求: option deprecated = true;; uint32 theme_id = 1;; repeated uint32 ids = 2;
+        响应: option deprecated = true;; uint32 theme_id = 1;; repeated uint32 ids = 2;
+    ▸ 12543  CS_TakeBingoExtraReward
+        请求: uint32 ONMNEMDCEIJ = 1;; uint32 PAGNJJKGIDA = 2;; CFKNEMOKCJB.FKMLNKOFMJL reward_type = 3;
+        响应: (空消息)
+    ▸ 21703  CS_TakeGradeReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Geopolitical】地缘玩法 —— 缺 5 条
+------------------------------------------------------------------------------------------------
+    ▸ 20505  CS_GeopoliticalOp
+        请求: option deprecated = true;; AOANKMGNKJA op = 1;
+        响应: option deprecated = true;; AOANKMGNKJA.FFNAADNFIMB code = 1;
+    ▸ 20508  CS_GeopoliticalQuit
+        请求: option deprecated = true;; uint32 APKPGIIILDA = 1;
+        响应: option deprecated = true;
+    ▸ 20510  CS_GeopoliticalSettle
+        请求: option deprecated = true;; uint32 APKPGIIILDA = 1;
+        响应: option deprecated = true;; IGEHNGMBAKF result = 1;
+    ▸ 20516  CS_GeopoliticalCardPreset
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 KNNLHDNENDH = 2;; map<uint32, uint32> LHLLCBJLMOE = 3;; string name = 4;
+        响应: option deprecated = true;; uint32 KNNLHDNENDH = 1;; map<uint32, uint32> LHLLCBJLMOE = 2;; string name = 3;
+    ▸ 20518  CS_GeopoliticalStageRaid
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 stage_id = 2;; uint32 PBJFCONNMBB = 3;
+        响应: option deprecated = true;; uint32 theme_id = 1;; uint32 PBJFCONNMBB = 2;; map<uint32, uint32> drops = 3;
+
+------------------------------------------------------------------------------------------------
+  【Afk】挂机 —— 缺 5 条
+------------------------------------------------------------------------------------------------
+    ▸ 29241  CS_AfkAssistantStart
+        请求: (空消息)
+        响应: (空消息)
+    ▸ 29243  CS_AfkAssistantEnd
+        请求: uint32 reason = 1;
+        响应: map<uint32, IHAAKGFOEGK> NLHOADMCIEL = 4;
+    ▸ 29245  CS_AfkAssistantInfo
+        请求: (空消息)
+        响应: LBMHFNEHFCP data = 1;
+    ▸ 29247  CS_AfkAssistantSetInfo
+        请求: uint32 id = 1;; ABAHIONHKPP info = 2;
+        响应: (空消息)
+    ▸ 29249  CS_AfkAssistantSetSeq
+        请求: repeated uint32 LEKFONGLCIJ = 1;
+        响应: repeated uint32 LEKFONGLCIJ = 1;
+
+------------------------------------------------------------------------------------------------
+  【Difficult】高难关卡 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 10348  CS_DifficultStoryRaid
+        请求: uint32 stage_id = 1;; uint32 num = 2;
+        响应: uint32 stage_id = 1;; uint32 num = 2;; StageTotalDrop drop = 3;
+    ▸ 10350  CS_DifficultStoryTakeReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 10354  CS_DifficultChapterRaid
+        请求: uint32 chapter = 1;; uint32 num = 2;
+        响应: uint32 chapter = 1;; uint32 total_num = 2;; uint32 total_raid = 3;
+    ▸ 10356  CS_DifficultChapterTakeReward
+        请求: uint32 chapter_id = 1;; repeated uint32 reward_ids = 3;
+        响应: uint32 chapter_id = 1;; repeated uint32 reward_ids = 3;
+
+------------------------------------------------------------------------------------------------
+  【Set】（Set 开头） —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 10445  CS_SetPersonalInformationSetting
+        请求: repeated EGEHKAKKDJO PHEEPJIDFHB = 1;
+        响应: repeated EGEHKAKKDJO PHEEPJIDFHB = 1;
+    ▸ 10447  CS_SetNameCardGameplaySlots
+        请求: repeated uint32 GPDFKEMELKI = 1;
+        响应: repeated uint32 GPDFKEMELKI = 1;
+    ▸ 10469  CS_SetNameCardCollectionSlots
+        请求: HLCNGJHKDDO IMABPMACCPJ = 1;; repeated uint32 NNIHIEBCAGA = 2;
+        响应: HLCNGJHKDDO IMABPMACCPJ = 1;; repeated uint32 NNIHIEBCAGA = 2;
+    ▸ 10475  CS_SetNameCardTheme
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;
+
+------------------------------------------------------------------------------------------------
+  【Store】商店 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 10524  CS_StoreCartGoodChange
+        请求: uint32 BFOLFKPANIA = 1;; bool NDIFHJLLMHL = 2;
+        响应: uint32 BFOLFKPANIA = 1;; bool NDIFHJLLMHL = 2;
+    ▸ 10526  CS_StoreCartGoodSelected
+        请求: uint32 BFOLFKPANIA = 1;
+        响应: uint32 BFOLFKPANIA = 1;; bool LFBPBCHGCIH = 2;
+    ▸ 10528  CS_StoreCartBatchGoodSelected
+        请求: repeated uint32 OLJMKIIKCCH = 1;; bool LFBPBCHGCIH = 2;
+        响应: repeated uint32 OLJMKIIKCCH = 1;; bool LFBPBCHGCIH = 2;
+    ▸ 10924  CS_StoreTouchGelinna
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Uav】无人机 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 11900  CS_UavRevelant
+        请求: option deprecated = true;
+        响应: option deprecated = true;; UavRevelant uav_revelant = 1 [deprecated = true];
+    ▸ 11904  CS_UavArmLevelUp
+        请求: option deprecated = true;; uint32 id = 1;
+        响应: option deprecated = true;; UavArm arm = 1 [deprecated = true];
+    ▸ 11906  CS_UavArmInstall
+        请求: option deprecated = true;; uint32 position = 1;; uint32 arm_id = 2;
+        响应: option deprecated = true;; repeated uint32 uav_equips = 1;
+    ▸ 11910  CS_UavUpGrade
+        请求: option deprecated = true;
+        响应: option deprecated = true;; uint32 grade = 1;
+
+------------------------------------------------------------------------------------------------
+  【Unlock】（Unlock 开头） —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 11908  CS_UnlockUavArm
+        请求: option deprecated = true;; uint32 arm_id = 1;
+        响应: option deprecated = true;; UavArm arm = 1 [deprecated = true];
+    ▸ 11938  CS_UnlockFinalMode
+        请求: option deprecated = true;
+        响应: option deprecated = true;; bool PKDEDLNABOI = 1;
+    ▸ 12540  CS_UnlockAdvancedReward
+        请求: uint32 ONMNEMDCEIJ = 1;
+        响应: (空消息)
+    ▸ 21705  CS_UnlockTalent
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Tps】第三人称玩法 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 21751  CS_TpsShootInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; map<uint32, NIADMJDPIDM> KNMAKEJFGDK = 2;; repeated uint32 JHONJAGOIHM = 3;; repeated uint32 LKEFGIDEOLJ = 4;
+    ▸ 21753  CS_TpsShootStart
+        请求: uint32 theme_id = 1;; uint32 stage_id = 2;; uint32 gun_id = 3;; uint32 weapon_id = 4;; uint32 OAHJPGGOKKI = 5;
+        响应: (空消息)
+    ▸ 21755  CS_TpsShootFinish
+        请求: uint32 theme_id = 1;; uint32 stage_id = 2;; uint32 duration = 3;; uint32 rank = 4;; uint32 result = 5;; uint32 CHBFHIPAOIE = 6;; uint32 score = 7;
+        响应: uint32 rank = 1;; uint32 duration = 2;; uint32 unlock_stage = 3;; repeated uint32 JHONJAGOIHM = 4;; repeated uint32 LKEFGIDEOLJ = 5;; uint32 theme_id = 6;; uint32 stage_id = 7;; uint32 DBOELJHEODN = 8;
+              …共 14 个字段
+    ▸ 21757  CS_TpsShootRank
+        请求: uint32 theme_id = 1;; ICNGPLIGIGK OCGNAONELAA = 2;; repeated uint64 IBOOHICHJGC = 3;;     enum ICNGPLIGIGK {
+        响应: uint32 theme_id = 1;; CNFJFPEBJLA OCGNAONELAA = 2;; repeated NEOMHANHBEM JADNNNNIIMB = 3;;     enum CNFJFPEBJLA {
+
+------------------------------------------------------------------------------------------------
+  【Shootspace】射击空间 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 21761  CS_ShootspaceInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; map<uint32, CFGNAOGCNNF> FDPOAJJJKGC = 2;; repeated uint32 IMOHEBMLOBE = 3;; uint32 DEGNALHNOMI = 4;; map<uint32, uint32> CPGHILACOBD = 5;
+    ▸ 21763  CS_ShootspaceStart
+        请求: uint32 theme_id = 1;; uint32 PKIHMDBPBBD = 2;; uint32 gun_id = 3;
+        响应: uint32 theme_id = 1;; uint32 PKIHMDBPBBD = 2;
+    ▸ 21765  CS_ShootspaceFinish
+        请求: uint32 theme_id = 1;; uint32 PKIHMDBPBBD = 2;; uint32 duration = 3;; uint32 score = 4;; map<uint32, uint32> DPIODNMOADH = 5;; map<uint32, uint32> IFDNNGFHCKK = 6;
+        响应: uint32 theme_id = 1;; uint32 PKIHMDBPBBD = 2;; uint32 DEGNALHNOMI = 3;; uint32 CGFMBCCDFPG = 4;; uint32 score = 5;; map<uint32, uint32> DPIODNMOADH = 6;; uint32 OOIEOPBGJBD = 7;; uint32 times = 8;
+    ▸ 21767  CS_ShootspaceGetTalent
+        请求: uint32 theme_id = 1;; uint32 talent_id = 2;
+        响应: uint32 theme_id = 1;; repeated uint32 IMOHEBMLOBE = 2;; map<uint32, uint32> CPGHILACOBD = 3;
+
+------------------------------------------------------------------------------------------------
+  【Love】好感度 —— 缺 4 条
+------------------------------------------------------------------------------------------------
+    ▸ 21801  CS_LoveSendGift
+        请求: uint32 gun_id = 1;; map<uint32, uint32> MLDDFFDLNHD = 2;
+        响应: uint32 gun_id = 1;; uint32 JLHFICPMAEI = 2;; uint32 FDKIHAPHHPD = 3;; int64 JKGBIKEDACK = 4;
+    ▸ 21803  CS_LoveSendEventGift
+        请求: uint32 gun_id = 1;
+        响应: uint32 gun_id = 1;; uint32 FDKIHAPHHPD = 2;; uint32 JLHFICPMAEI = 3;
+    ▸ 21806  CS_LoveVow
+        请求: uint32 gun_id = 1;
+        响应: uint32 gun_id = 1;; int64 PCPEAMOJPCF = 2;
+    ▸ 21808  CS_LoveUpgradeDirectly
+        请求: uint32 gun_id = 1;
+        响应: uint32 gun_id = 1;; uint32 FDKIHAPHHPD = 2;; uint32 JLHFICPMAEI = 3;
+
+------------------------------------------------------------------------------------------------
+  【Other】（Other 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 10594  CS_OtherUserBriefList
+        请求: repeated uint64 uid = 1;
+        响应: map<uint64, BinaryUser> users = 1;; bool MIIPLLAKJKI = 2;
+    ▸ 10596  CS_OtherUserDisplayBoard
+        请求: uint64 uid = 1;
+        响应: uint64 uid = 1;; bool DKDGKJJMFJH = 2;; IPMBHDNIJAG.HNNCLKHPLDN OANKLPINLFB = 3;
+    ▸ 10598  CS_OtherUserBrief
+        请求: uint64 uid = 1;
+        响应: uint64 uid = 1;; bool DKDGKJJMFJH = 2;; BinaryUser user = 3;
+
+------------------------------------------------------------------------------------------------
+  【Social】（Social 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 10638  CS_SocialBlackList
+        请求: (空消息)
+        响应: map<uint64, BinaryUser> PJLJILBMLCO = 1;
+    ▸ 10640  CS_SocialBlackSet
+        请求: uint64 uid = 1;
+        响应: uint64 uid = 1;
+    ▸ 10642  CS_SocialBlackRemove
+        请求: uint64 uid = 1;
+        响应: uint64 uid = 1;
+
+------------------------------------------------------------------------------------------------
+  【Gun】（Gun 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 11122  CS_GunLevelUpFinish
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11124  CS_GunLevelUpReduceCd
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 11126  CS_GunLevelUpExit
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Moment】（Moment 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 11727  CS_MomentFetch
+        请求: (空消息)
+        响应: repeated GJOMFOACDKM KCMDKLFKKGM = 1;; uint32 IEKMOJNONDP = 2;
+    ▸ 11730  CS_MomentBless
+        请求: uint64 JEHNONBAMEO = 1;; string content = 2;; KHLDHBPIANC IPEGJFMEDIM = 3;
+        响应: uint32 IEKMOJNONDP = 1;; map<uint32, uint32> reward = 2;
+    ▸ 11732  CS_MomentBlessAll
+        请求: (空消息)
+        响应: uint32 IEKMOJNONDP = 1;; repeated GJOMFOACDKM KCMDKLFKKGM = 2;; map<uint32, uint32> reward = 3;
+
+------------------------------------------------------------------------------------------------
+  【Mini】（Mini 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 12558  CS_MiniGameStart
+        请求: uint32 id = 1;
+        响应: (空消息)
+    ▸ 12560  CS_MiniGameFinish
+        请求: uint32 id = 1;; uint32 score = 2;; uint64 duration = 3;; map<uint32, uint32> IFDNNGFHCKK = 4;; map<uint32, uint32> EMPHGJBAHBP = 5;
+        响应: NIPCKNMLFAK DMANPLMCCPG = 1;
+    ▸ 12562  CS_MiniGameStageFinish
+        请求: uint32 id = 1;; uint32 stage_id = 3;; uint64 duration = 4;; map<uint32, uint32> EMPHGJBAHBP = 5;
+        响应: uint32 HNLHNMNDCMA = 1 [deprecated = true];; map<uint32, CIPEIDNGGEJ> DAJJGHEKODD = 2;
+
+------------------------------------------------------------------------------------------------
+  【Dark】（Dark 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 20002  CS_DarkZonePlayerUpdate
+        请求: (空消息)
+        响应: uint64 seq = 1;; repeated DarkZonePlayer.Update player = 2;; repeated DLJLAHEPBLI.Update map = 3;
+    ▸ 20030  CS_DarkZoneStep2MapInfo
+        请求: (空消息)
+        响应: (proto 中无定义)
+    ▸ 20032  CS_DarkZoneStep3MapDynInfo
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Jigsaw】（Jigsaw 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 21651  CS_JigsawInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; map<uint32, bool> FPDKCBNKCAB = 2;
+    ▸ 21653  CS_JigsawCompleteOnePic
+        请求: uint32 theme_id = 1;; uint32 HFGNEPFLJMD = 2;
+        响应: uint32 theme_id = 1;; uint32 HFGNEPFLJMD = 2;
+    ▸ 21655  CS_JigsawClaimReward
+        请求: uint32 theme_id = 1;; uint32 HFGNEPFLJMD = 2;
+        响应: uint32 theme_id = 1;; uint32 HFGNEPFLJMD = 2;
+
+------------------------------------------------------------------------------------------------
+  【Operation】（Operation 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 22322  CS_OperationMiniGameInfo
+        请求: uint32 IKDMNOBMIFE = 1;
+        响应: uint32 IKDMNOBMIFE = 1;;     oneof PEGBAOBPIJE {
+    ▸ 22324  CS_OperationMiniGameStart
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 stage_id = 3;
+        响应: uint32 IKDMNOBMIFE = 1;; uint32 stage_id = 3;
+    ▸ 22326  CS_OperationMiniGameFinish
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 stage_id = 3;; uint32 duration = 4;; uint32 score = 5;;     oneof GENIPLCCHHG {;     message MIGIACELIJJ {
+        响应: uint32 IKDMNOBMIFE = 1;; uint32 stage_id = 3;; uint32 score = 4;; uint32 CGFMBCCDFPG = 5;; repeated uint32 unlock_stage = 6;;     oneof FKBIHGJPIKL {;     message GachaCounter {;     message GKIFHAMPMKP {
+
+------------------------------------------------------------------------------------------------
+  【Lobby】（Lobby 开头） —— 缺 3 条
+------------------------------------------------------------------------------------------------
+    ▸ 29700  CS_LobbyGameInfo
+        请求: GGIHCININON type = 1;
+        响应: GGIHCININON type = 1;;     oneof BMAMNIIDFCL {
+    ▸ 29702  CS_LobbyGameStart
+        请求: GGIHCININON type = 1;;     oneof OLLMDFLKENG {
+        响应: GGIHCININON type = 1;;     oneof FDENBPCPKEO {
+    ▸ 29706  CS_LobbyGameClaimUltimateRewards
+        请求: GGIHCININON type = 1;;     oneof FGCLKLEKEDE {
+        响应: GGIHCININON type = 1;;     oneof NFJCCOPCNKF {
+
+------------------------------------------------------------------------------------------------
+  【Dev】（Dev 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10000  CS_DevLogin
+        请求: uint64 uid = 1;; bool test = 2;; bool reconnect = 10;; string stc_version = 11;; uint32 platform = 20;; OssClientParam oss_param = 30;; string NEPCNGPCCKE = 40;
+        响应: (proto 中无定义)
+    ▸ 10008  CS_DevIsLogin
+        请求: uint64 uid = 1;
+        响应: bool logged = 1;
+
+------------------------------------------------------------------------------------------------
+  【Test】（Test 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10006  CS_Test
+        请求: bytes data = 1;
+        响应: bytes data = 1;
+    ▸ 10050  CS_TestProtocol
+        请求: bytes data = 1;
+        响应: bytes data = 1;
+
+------------------------------------------------------------------------------------------------
+  【LeaderBoard】排行榜 —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10433  CS_LeaderBoard
+        请求: uint32 plan_id = 1;; uint32 idx = 2;
+        响应: uint32 plan_id = 1;; uint32 idx = 2;; repeated LeaderBoardStep_2.Elem elems = 3;; int64 timestamp = 4;
+    ▸ 10435  CS_LeaderBoardDetail
+        请求: uint32 plan_id = 1;; uint32 idx = 2;; uint32 elem_idx = 3;; int64 timestamp = 4;
+        响应: bytes data = 1;
+
+------------------------------------------------------------------------------------------------
+  【Use】（Use 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10452  CS_UseGiftPick
+        请求: uint32 item = 1;; repeated uint32 select = 2;; uint32 num = 3;
+        响应: uint32 item = 1;; uint32 num = 3;
+    ▸ 11219  CS_UseCustomizedGift
+        请求: uint32 id = 1;; uint32 JGPCKFBCLBP = 2;; uint32 HKEJMFJDEBB = 3;; uint32 num = 4;
+        响应: uint32 id = 1;; uint32 num = 2;
+
+------------------------------------------------------------------------------------------------
+  【Common】（Common 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10821  CS_CommonQuestTakeReward
+        请求: CommonQuestCounters.Type type = 1;; repeated uint32 quest_id = 2;
+        响应: CommonQuestCounters.Type type = 1;; repeated uint32 quest_id = 2;
+    ▸ 10823  CS_CommonQuestTakePhaseReward
+        请求: CommonQuestCounters.Type type = 1;; repeated uint32 phase_id = 2;
+        响应: CommonQuestCounters.Type type = 1;; repeated uint32 phase_id = 2;
+
+------------------------------------------------------------------------------------------------
+  【Multi】（Multi 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 10831  CS_MultiQuestTypeTakeReward
+        请求: repeated CommonQuestCounters.Type types_ = 1;
+        响应: repeated CommonQuestCounters.Type types_ = 1;
+    ▸ 21301  CS_MultiWaveInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; map<uint32, uint32> BPJANAFAHDO = 2;
+
+------------------------------------------------------------------------------------------------
+  【Add】（Add 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 11717  CS_AddRobotChat
+        请求: repeated AMessage message_list = 1;
+        响应: repeated RobotChatMessageForClient message_list = 1;; uint32 uid = 2;
+    ▸ 12414  CS_AddInspirationOrder
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 MGOMIAPJDMF = 2;; uint32 IFPPJGAPBHP = 3;
+        响应: option deprecated = true;; HFKKJLDANMK JLNNIMBCOME = 1;
+
+------------------------------------------------------------------------------------------------
+  【Inspiration】（Inspiration 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 12412  CS_InspirationOrders
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; repeated KMIEEHGCEJB GCHKAOPFPJF = 1;
+    ▸ 12440  CS_InspirationInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; uint32 LCBAIHPPGOI = 1;; map<uint32, uint32> record = 2;; uint32 theme_id = 3;
+
+------------------------------------------------------------------------------------------------
+  【Bingo】（Bingo 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 12443  CS_BingoInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; GCFCPFCBMGO info = 1;
+    ▸ 12445  CS_BingoScratch
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; repeated uint32 PACIJNCJNCN = 1;; repeated uint32 MAGGDJHGLDD = 2;
+
+------------------------------------------------------------------------------------------------
+  【Open】（Open 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 12538  CS_OpenBingoCard
+        请求: uint32 id = 1;; uint32 ONMNEMDCEIJ = 2;
+        响应: map<uint32, uint32> reward = 1;; repeated CFKNEMOKCJB DKGALENHPGJ = 2;
+    ▸ 22204  CS_OpenGrid
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 OHPHNKCEGCM = 2;; uint32 LBNHBMFFFJI = 3;
+        响应: option deprecated = true;; NDAENPPJNIB KPDINJGFBDG = 1;
+
+------------------------------------------------------------------------------------------------
+  【Event】（Event 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 12627  CS_EventGetEventSigninBpInfo
+        请求: uint32 IKDMNOBMIFE = 1;
+        响应: GDPBHBFMBMJ BNLAGAGNIEA = 1;
+    ▸ 12629  CS_EventSigninBpGetReward
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 idx = 2;; bool MPNGHAKGLDM = 3;; bool KEDKPPDFAHD = 4;
+        响应: uint32 IKDMNOBMIFE = 1;; uint32 idx = 2;; bool MPNGHAKGLDM = 3;; bool KEDKPPDFAHD = 4;
+
+------------------------------------------------------------------------------------------------
+  【Geopolitic】（Geopolitic 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 20501  CS_GeopoliticStart
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 stage_id = 2;
+        响应: option deprecated = true;; uint32 APKPGIIILDA = 1;; KJPOHLCCMNP DMANPLMCCPG = 2;
+    ▸ 20503  CS_GeopoliticRestore
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; KJPOHLCCMNP DMANPLMCCPG = 1;
+
+------------------------------------------------------------------------------------------------
+  【Geo】（Geo 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 20512  CS_GeoWarmUpInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; MDKEPKEFKFE NOFCDNDEEEK = 1;; MBJMMEPDLIO room = 2;
+    ▸ 20514  CS_GeoFormalInfo
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; LFNFHOKCAGF MKDFMMEOCGH = 1;; MBJMMEPDLIO room = 2;
+
+------------------------------------------------------------------------------------------------
+  【Newbee】（Newbee 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 21503  CS_NewbeeTakeFirstRewardV2
+        请求: uint32 ONMNEMDCEIJ = 1;
+        响应: uint32 ONMNEMDCEIJ = 1;
+    ▸ 21505  CS_NewbeeTakeStepRewardV2
+        请求: uint32 ONMNEMDCEIJ = 1;; uint32 reward_id = 2;
+        响应: uint32 ONMNEMDCEIJ = 1;; uint32 reward_id = 2;
+
+------------------------------------------------------------------------------------------------
+  【Pazzle】（Pazzle 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 21601  CS_PazzleStageInfo
+        请求: uint32 theme_id = 1;
+        响应: uint32 theme_id = 1;; repeated uint32 FPDKCBNKCAB = 2;
+    ▸ 21603  CS_PazzleStageGetReward
+        请求: uint32 theme_id = 1;; uint32 KNAHJGMNKIL = 2;
+        响应: uint32 theme_id = 1;; uint32 KNAHJGMNKIL = 2;
+
+------------------------------------------------------------------------------------------------
+  【Gain】（Gain 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 21938  CS_GainSupply
+        请求: uint64 HBJDLKNJMCE = 1;; bool JMCPOOICGIF = 2;
+        响应: repeated IMOIGLKCFPI JOKLGHEGECD = 1;
+    ▸ 21948  CS_GainIndividualScoreReward
+        请求: uint32 id = 1;; bool JMCPOOICGIF = 2;
+        响应: repeated uint32 ILDJDPKPOFE = 1;
+
+------------------------------------------------------------------------------------------------
+  【Change】（Change 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 21940  CS_ChangeLeader
+        请求: uint64 ENNGLKNAAOI = 1;
+        响应: (空消息)
+    ▸ 22100  CS_ChangeLanguage
+        请求: string NEPCNGPCCKE = 1;
+        响应: string NEPCNGPCCKE = 1;
+
+------------------------------------------------------------------------------------------------
+  【Free】（Free 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 22300  CS_FreeSkinInfo
+        请求: uint32 IKDMNOBMIFE = 1 [deprecated = true];
+        响应: uint32 IKDMNOBMIFE = 1 [deprecated = true];; repeated uint32 CFOCLIHKKJL = 2 [deprecated = true];; map<uint32, OEJOKJAACAO> BDMFDKACPPI = 3;
+    ▸ 22302  CS_FreeSkinGetReward
+        请求: uint32 IKDMNOBMIFE = 1;; uint32 reward_id = 2;
+        响应: uint32 IKDMNOBMIFE = 1;
+
+------------------------------------------------------------------------------------------------
+  【Async】（Async 开头） —— 缺 2 条
+------------------------------------------------------------------------------------------------
+    ▸ 22968  CS_AsyncDefendSequence
+        请求: repeated uint32 queue = 1;
+        响应: (proto 中无定义)
+    ▸ 22970  CS_AsyncModifyDefend
+        请求: JJBIMDPMPJF.QuestTag used = 1;
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Heart】（Heart 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10004  CS_HeartBeat
+        请求: (空消息)
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Gm】（Gm 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10054  CS_GmOperation
+        请求:     oneof AGKFNICNJAB {
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Init】（Init 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10110  CS_InitUser
+        请求: string name = 1;; Sex sex = 2;; uint32 birthday = 3;; KHLDHBPIANC IPEGJFMEDIM = 10;
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Cdk】CDK兑换 —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10146  CS_CdkRedeem
+        请求: string cdk_code = 1;
+        响应: int32 redeem_result = 1;
+
+------------------------------------------------------------------------------------------------
+  【Preface】（Preface 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10153  CS_PrefacePass
+        请求: (空消息)
+        响应: bool preface = 1;
+
+------------------------------------------------------------------------------------------------
+  【Group】（Group 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10210  CS_GroupMailReceive
+        请求: (空消息)
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Raid】（Raid 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10337  CS_Raid
+        请求: uint32 stc_stage_id = 1;; uint32 raid_times = 2;
+        响应: StageTotalDrop drops = 1;; uint32 stc_stage_id = 2;; uint32 raid_times = 3;; SpecialDrop special_drop = 4;
+
+------------------------------------------------------------------------------------------------
+  【Broadcast】广播 —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10403  CS_Broadcast
+        请求: (空消息)
+        响应: map<uint32, Broadcast> broadcasts = 1;
+
+------------------------------------------------------------------------------------------------
+  【Assistant】（Assistant 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10424  CS_AssistantRewardPick
+        请求: (空消息)
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Display】（Display 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10426  CS_DisplaySetting
+        请求: repeated uint32 GGOLBAILKIO = 1 [deprecated = true];; repeated MKMAFGIOPAN KODBGINIGOL = 2;;     message MKMAFGIOPAN {
+        响应: repeated HLDHKCBIDLJ DELPACHDBFG = 1;
+
+------------------------------------------------------------------------------------------------
+  【RealRanking】真实排行 —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10437  CS_RealRanking
+        请求: uint32 plan_id = 1;
+        响应: uint32 plan_id = 1;; RealRankingElem elem = 10;
+
+------------------------------------------------------------------------------------------------
+  【Delete】（Delete 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10454  CS_DeleteTimeLimitItems
+        请求: repeated uint32 items = 1;
+        响应: repeated uint32 items = 1;
+
+------------------------------------------------------------------------------------------------
+  【Update】（Update 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10494  CS_UpdateSettingEndlessTowerShare
+        请求: bool FKBNIHBEJME = 1;
+        响应: bool FKBNIHBEJME = 1;
+
+------------------------------------------------------------------------------------------------
+  【Third】（Third 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10644  CS_ThirdPartSocialBlackSync
+        请求: repeated uint64 uid = 1;
+        响应: map<uint64, HNINDAOJCKP> PJLJILBMLCO = 1;; bool MIIPLLAKJKI = 2;
+
+------------------------------------------------------------------------------------------------
+  【Quest】任务 —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10804  CS_QuestTakeReward
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Back】（Back 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10905  CS_BackAdjutantSet
+        请求: repeated uint32 adjutants = 1;
+        响应: (空消息)
+
+------------------------------------------------------------------------------------------------
+  【Npcs】（Npcs 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10920  CS_Npcs
+        请求: (空消息)
+        响应: map<uint32, Npc> npc_list = 1;
+
+------------------------------------------------------------------------------------------------
+  【Npc】（Npc 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 10922  CS_NpcChangeCostume
+        请求: uint32 npc_id = 1;; uint32 costume_id = 2;
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Lock】（Lock 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 11152  CS_LockGunWeaponModLockPlan
+        请求: repeated uint32 ids = 1;; uint32 BEFHELAINLN = 2;
+        响应: repeated uint32 ids = 1;; bool locked = 2;
+
+------------------------------------------------------------------------------------------------
+  【Resource】（Resource 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 11200  CS_Resource
+        请求: (空消息)
+        响应: Resource res = 1;
+
+------------------------------------------------------------------------------------------------
+  【Achievement】（Achievement 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 11300  CS_Achievement
+        请求: (空消息)
+        响应: (proto 中无定义)
+
+------------------------------------------------------------------------------------------------
+  【Nrt】（Nrt 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 11520  CS_NrtPvpSeasonSettleUpdate
+        请求: (空消息)
+        响应: NrtPvpSeasonSettle settle = 1;
+
+------------------------------------------------------------------------------------------------
+  【Pvp】（Pvp 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 11538  CS_PvpCycleReward
+        请求: repeated uint32 IGCMBNIFNKC = 1;
+        响应: repeated uint32 IGCMBNIFNKC = 1;
+
+------------------------------------------------------------------------------------------------
+  【Active】（Active 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12410  CS_ActiveInspiration
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; uint32 LCBAIHPPGOI = 1;; map<uint32, uint32> record = 2;
+
+------------------------------------------------------------------------------------------------
+  【Cancel】（Cancel 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12416  CS_CancelInspirationOrder
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint64 NFBNKJFLJGP = 2;
+        响应: option deprecated = true;; uint64 NFBNKJFLJGP = 1;
+
+------------------------------------------------------------------------------------------------
+  【Exchange】（Exchange 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12418  CS_ExchangeInspiration
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint64 NFBNKJFLJGP = 2;
+        响应: option deprecated = true;; uint64 NFBNKJFLJGP = 1;
+
+------------------------------------------------------------------------------------------------
+  【Refresh】（Refresh 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12420  CS_RefreshInspirationOrder
+        请求: option deprecated = true;; uint32 theme_id = 1;
+        响应: option deprecated = true;; repeated KMIEEHGCEJB GCHKAOPFPJF = 2;
+
+------------------------------------------------------------------------------------------------
+  【Confirm】（Confirm 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12422  CS_ConfirmExchange
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint64 NFBNKJFLJGP = 2;; uint64 HBAMJGHAFIF = 3;
+        响应: option deprecated = true;; uint64 NFBNKJFLJGP = 1;
+
+------------------------------------------------------------------------------------------------
+  【Treasure】（Treasure 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 12534  CS_TreasureLvUp
+        请求: uint32 ONMNEMDCEIJ = 1;
+        响应: uint32 level = 1;; uint32 exp = 2;
+
+------------------------------------------------------------------------------------------------
+  【Dismantle】（Dismantle 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 20026  CS_DismantleEntities
+        请求: repeated uint64 ids = 1;
+        响应: repeated uint64 ids = 1;
+
+------------------------------------------------------------------------------------------------
+  【Naming】（Naming 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 20520  CS_NamingCardGroup
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 KNNLHDNENDH = 2;; string name = 3;
+        响应: option deprecated = true;; uint32 KNNLHDNENDH = 1;; string name = 4;
+
+------------------------------------------------------------------------------------------------
+  【Online】（Online 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 20705  CS_OnlineGameStageInfo
+        请求: uint64 battle_id = 1;
+        响应: uint64 battle_id = 1;; int64 MCCLKFALMGM = 2;; EBDCGENPBFM info = 3;
+
+------------------------------------------------------------------------------------------------
+  【Enter】（Enter 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 22202  CS_EnterDungeon
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 OHPHNKCEGCM = 2;; repeated DEGPONJCLFF NDKGOAHEAMJ = 3 [deprecated = true];; repeated uint32 IPCNPGBIKHK = 4;
+        响应: option deprecated = true;; NDAENPPJNIB KPDINJGFBDG = 1;
+
+------------------------------------------------------------------------------------------------
+  【Interact】（Interact 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 22206  CS_InteractWithGrid
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 OHPHNKCEGCM = 2;; uint32 LBNHBMFFFJI = 3;
+        响应: option deprecated = true;; NDAENPPJNIB KPDINJGFBDG = 1;
+
+------------------------------------------------------------------------------------------------
+  【Leave】（Leave 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 22208  CS_LeaveDungeon
+        请求: option deprecated = true;; uint32 theme_id = 1;; uint32 OHPHNKCEGCM = 2;; uint32 reason = 3;
+        响应: option deprecated = true;
+
+------------------------------------------------------------------------------------------------
+  【Join】（Join 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 22950  CS_JoinBattleGroup
+        请求: (空消息)
+        响应: uint64 group_id = 1;; JJBIMDPMPJF.NDJKGEJJDPP KHKDOADBMPI = 2;
+
+------------------------------------------------------------------------------------------------
+  【Time】（Time 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 23014  CS_TimeZone
+        请求: (空消息)
+        响应: int32 OFLLLHEJEDO = 1;
+
+------------------------------------------------------------------------------------------------
+  【Ex】（Ex 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 23023  CS_ExPickThemeReward
+        请求: uint32 theme_id = 1;
+        响应: map<uint32, uint32> rewards = 1;
+
+------------------------------------------------------------------------------------------------
+  【Formation】（Formation 开头） —— 缺 1 条
+------------------------------------------------------------------------------------------------
+    ▸ 23208  CS_FormationAiPresetModify
+        请求: uint32 preset_id = 1;; repeated BattleAiGun OGNHICHKFAD = 2;
+        响应: uint32 preset_id = 1;; repeated BattleAiGun OGNHICHKFAD = 2;
+
+====================================================================================================
+【五】已实现消息中"字段完成度"最低的（自动扫描：proto 字段数 vs 服务端赋值数）
+====================================================================================================
+  SC 消息                    字段数    赋值数      handler 文件
+  SC_NrtPvpInfo            19     0        NrtPvpHandler.cs
+  SC_Store                 11     0        StoreHandler.cs
+  SC_HighPvpInfo           8      0        EasyEmptyHandlers.cs
+  SC_TargetBossGetRank     6      0        EasyEmptyHandlers.cs
+  SC_GetGuildBattleMissionInfo 9      1        GuildHandler.cs
+  SC_DarkZoneGetEthnicInfo 9      2        DarkZoneHandler.cs
+  SC_LobbyGetEventInfo     6      2        LobbyHandler.cs
+  SC_Login                 11     11       LoginHandler.cs
+  SC_LobbyGetCafeInfo      6      6        LobbyHandler.cs
+  SC_LobbyBuffInfo         6      9        LobbyHandler.cs
+  SC_StageUsableGuns       9      29       StageHandler.cs
+
+  说明：赋值数是粗略计数（含非字段赋值），只用于**排序线索**；
+        点开对应 handler 对照该消息的 proto 字段表即可确认缺哪几个。
+
+====================================================================================================
+【六】建议实施顺序（按"影响主线 × 工作量"排）
+====================================================================================================
+  第0批（打通副本，最高价值）
+    1. StageBattle 补 side(7) + camps(9) 打开（去掉 GF2_STAGE_CAMPS 开关）
+    2. JPPLEFEAECH 补 Property(10) + InheritProperty(12)（属性从表算）
+    3. OPADLDPIIKL 补 LBJLMGIPOJA(2)（槽位）—— 需先确认 LECCHKLIOOK 字段
+    4. 实现 SC_StageResult(10311) + 结算确认(10324)
+  第1批（主循环）
+    5. QuestTakeReward(10804) / CommonQuestTakeReward(10821) / TakePhaseReward(10823)
+       → 请求字段见第四章 Quest 族
+    6. ModName(10116)/ModSex(10118)/ModBirthday(10120)/ModMotto(10112)/ModPortrait(10114)
+  第2批（信息展示）
+    7. LeaderBoard(10433)/LeaderBoardDetail(10435)/RealRanking(10437) —— 可先回空列表
+    8. Broadcast(10403)、CdkRedeem(10146)
+  第3批（玩法内容，工作量大）
+    9. Guild 族 10 条、Rouge 14 条、Kitty 12 条、Sand 11 条、Lounge 15 条
+
+====================================================================================================
+  报告结束 · 生成脚本可重跑（同一数据源：解密元数据 + il2cpp dump + proto）
+====================================================================================================
